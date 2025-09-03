@@ -8,11 +8,18 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        .map-container {
+        body, html {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        #app {
             position: relative;
             width: 100%;
-            height: calc(100vh - 120px);
-            overflow: hidden;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
         #map {
             width: 100%;
@@ -29,11 +36,42 @@
         .button-icon {
             filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
         }
+        .name-input-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: #fff;
+            padding: 2rem;
+            border-radius: 1rem;
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+        .leaflet-tooltip.name-tooltip {
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 4px 8px;
+            font-weight: bold;
+            color: #333;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
     </style>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global variables for Firebase initialization, provided by the canvas environment.
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -45,6 +83,7 @@
         let auth, db;
         let currentUser;
         let userMarker;
+        let userName = "";
         const friendMarkers = {};
         let watchId = null;
         const locationsCollectionRef = `artifacts/${appId}/public/data/locations`;
@@ -74,14 +113,46 @@
                 currentUser = auth.currentUser;
                 console.log("Firebase initialized and user signed in:", currentUser.uid);
 
-                // Start location tracking
-                startLocationTracking();
-                // Start listening to other users' locations
-                listenToFriendLocations();
+                // Check for user name
+                const userDocRef = doc(db, locationsCollectionRef, currentUser.uid);
+                const userDoc = await getDoc(userDocRef);
+                if (userDoc.exists() && userDoc.data().name) {
+                    userName = userDoc.data().name;
+                    startLocationTracking();
+                    listenToFriendLocations();
+                } else {
+                    promptForName();
+                }
 
             } catch (error) {
                 console.error("Error initializing Firebase or signing in:", error);
             }
+        };
+
+        // Function to prompt user for their name
+        const promptForName = () => {
+            const modal = document.getElementById('name-input-modal');
+            const saveBtn = document.getElementById('save-name-btn');
+            const nameInput = document.getElementById('name-input');
+
+            modal.style.display = 'flex';
+            
+            saveBtn.addEventListener('click', async () => {
+                const name = nameInput.value.trim();
+                if (name) {
+                    userName = name;
+                    await updateUserLocation({ name: userName });
+                    modal.style.display = 'none';
+                    startLocationTracking();
+                    listenToFriendLocations();
+                } else {
+                    // Use a custom message box instead of alert()
+                    const messageBox = document.createElement('div');
+                    messageBox.className = 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white p-4 rounded-lg shadow-lg z-[2000] text-center';
+                    messageBox.innerHTML = '<p class="text-gray-800">Veuillez entrer un prénom pour continuer.</p><button class="mt-4 bg-blue-500 text-white p-2 rounded-lg" onclick="this.parentNode.remove()">OK</button>';
+                    document.body.appendChild(messageBox);
+                }
+            });
         };
 
         // Initialize Map using Leaflet.js
@@ -128,15 +199,16 @@
                                     map.setView(userLocation);
                                 }
                                 
-                                const customIcon = L.divIcon({
+                                const customUserIcon = L.divIcon({
                                     className: 'custom-div-icon',
-                                    html: `<svg class="map-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#3B82F6"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>`,
-                                    iconSize: [32, 32],
-                                    iconAnchor: [16, 32]
+                                    html: `<svg class="map-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#3B82F6"><circle cx="12" cy="12" r="6"/></svg>`,
+                                    iconSize: [24, 24],
+                                    iconAnchor: [12, 12]
                                 });
 
                                 if (!userMarker) {
-                                    userMarker = L.marker([latitude, longitude], { icon: customIcon }).addTo(map);
+                                    userMarker = L.marker([latitude, longitude], { icon: customUserIcon }).addTo(map);
+                                    userMarker.bindTooltip(userName, {permanent: true, direction: 'top', offset: [0, -15], className: 'name-tooltip'}).openTooltip();
                                 } else {
                                     userMarker.setLatLng([latitude, longitude]);
                                 }
@@ -193,6 +265,7 @@
                     lat: location.lat,
                     lng: location.lng,
                     timestamp: new Date(),
+                    name: userName, // Added user name
                     isSharing: true,
                 });
                 console.log("Location updated in Firestore.");
@@ -208,7 +281,7 @@
                 snapshot.docChanges().forEach((change) => {
                     const docData = change.doc.data();
                     const friendId = change.doc.id;
-                    const { lat, lng } = docData;
+                    const { lat, lng, name } = docData;
 
                     if (friendId === currentUser.uid) {
                         return; // Don't process the current user's location
@@ -218,15 +291,16 @@
                         const friendLocation = [lat, lng];
 
                         if (friendMarkers[friendId]) {
-                            friendMarkers[friendId].setLatLng(friendLocation);
+                            friendMarkers[friendId].setLatLng(friendLocation).bindTooltip(name, {permanent: true, direction: 'top', offset: [0, -15], className: 'name-tooltip'}).openTooltip();
                         } else {
                             const customIcon = L.divIcon({
                                 className: 'custom-div-icon',
-                                html: '<svg viewBox="0 0 24 24" class="h-6 w-6 text-purple-600"><path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"></path></svg>',
+                                html: '<svg viewBox="0 0 24 24" fill="#6B21A8"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>',
                                 iconSize: [24, 24],
                                 iconAnchor: [12, 24]
                             });
                             friendMarkers[friendId] = L.marker(friendLocation, { icon: customIcon }).addTo(map);
+                            friendMarkers[friendId].bindTooltip(name, {permanent: true, direction: 'top', offset: [0, -15], className: 'name-tooltip'}).openTooltip();
                         }
                     } else if (change.type === "removed") {
                         if (friendMarkers[friendId]) {
@@ -251,7 +325,13 @@
             if (viewName === 'map') {
                 document.getElementById('map-view').classList.remove('hidden');
                 document.getElementById('map-btn').classList.add('text-blue-500');
-                setTimeout(() => map.invalidateSize(), 100);
+                // The map view is always visible, so no need for invalidateSize
+                // on a hidden element. Instead, just center the map if needed.
+                if (userMarker) {
+                    map.setView(userMarker.getLatLng());
+                } else {
+                    map.setView(lyceeCenter);
+                }
             } else if (viewName === 'friends') {
                 document.getElementById('friends-view').classList.remove('hidden');
                 document.getElementById('friends-btn').classList.add('text-blue-500');
@@ -285,62 +365,72 @@
     </script>
 </head>
 <body class="bg-gray-50 font-sans flex flex-col min-h-screen">
+    
+    <!-- Modal de saisie du nom -->
+    <div id="name-input-modal" class="name-input-modal">
+        <div class="modal-content">
+            <h2 class="text-xl font-bold mb-4">Bienvenue sur GéoLycée</h2>
+            <p class="text-gray-600 mb-6">Veuillez entrer votre prénom pour continuer.</p>
+            <input id="name-input" type="text" placeholder="Entrez votre prénom..." class="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4">
+            <button id="save-name-btn" class="w-full bg-blue-500 text-white p-2 rounded-lg font-bold hover:bg-blue-600 transition-colors duration-200">
+                Commencer
+            </button>
+        </div>
+    </div>
+    
     <div id="app" class="relative w-full h-full flex flex-col">
 
         <!-- En-tête -->
-        <div class="bg-white shadow-lg p-4 flex items-center justify-center">
+        <div class="bg-white shadow-lg p-4 flex items-center justify-center z-40">
             <h1 class="text-2xl font-bold text-center text-gray-800">GéoLycée</h1>
         </div>
         
-        <!-- Vue de la carte (visible par défaut) -->
-        <div id="map-view" class="flex-grow flex flex-col w-full h-full">
-            <div class="map-container flex-grow w-full rounded-lg shadow-inner border border-gray-200">
-                <div id="map"></div>
-            </div>
+        <!-- Vue principale (La carte) -->
+        <div id="map-view" class="flex-grow flex flex-col w-full h-full relative">
+            <div id="map" class="flex-grow w-full h-full"></div>
             
-            <div id="status" class="hidden text-center text-sm font-medium p-3 rounded-lg bg-red-100 text-red-700 transition-opacity duration-300">
+            <div id="status" class="absolute top-4 left-1/2 -translate-x-1/2 hidden text-center text-sm font-medium p-3 rounded-lg bg-red-100 text-red-700 transition-opacity duration-300 z-30">
                 Une erreur de géolocalisation est survenue.
+            </div>
+
+            <!-- Menu du bas flottant -->
+            <div class="absolute inset-x-0 bottom-0 bg-white shadow-lg p-4 flex justify-around items-center rounded-t-xl z-50">
+                <!-- Bouton Amis -->
+                <button id="friends-btn" class="menu-btn flex flex-col items-center text-gray-600 hover:text-purple-600 transition-colors duration-200 group">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 button-icon group-hover:text-purple-600 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                    </svg>
+                    <span class="text-xs mt-1">Amis</span>
+                </button>
+                
+                <!-- Bouton Carte (au centre) -->
+                <button id="map-btn" class="menu-btn flex flex-col items-center text-gray-600 hover:text-blue-600 transition-colors duration-200 group">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 button-icon group-hover:text-blue-600 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
+                        <circle cx="12" cy="12" r="6"/>
+                    </svg>
+                    <span class="text-xs mt-1">Carte</span>
+                </button>
+
+                <!-- Bouton Paramètres -->
+                <button id="settings-btn" class="menu-btn flex flex-col items-center text-gray-600 hover:text-gray-900 transition-colors duration-200 group">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 button-icon group-hover:text-gray-900 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19.4 12c.42 0 .78.27.9.65L22 17.5c.12.38-.05.8-.43.99l-3.23 1.84c-.38.19-.84.07-1.1-.28l-.98-1.42c-.26-.37-.68-.58-1.13-.58H8.02c-.45 0-.87.21-1.13.58l-.98 1.42c-.26.37-.72.46-1.1.28L1.44 18.49c-.38-.19-.55-.61-.43-.99L3.5 12.65c.12-.38.48-.65.9-.65.45 0 .87.21 1.13.58l.98 1.42c.26.37.68.58 1.13.58h7.96c.45 0 .87-.21 1.13-.58l.98-1.42c.26-.37.72-.46 1.1-.28l3.23 1.84z"/>
+                    </svg>
+                    <span class="text-xs mt-1">Paramètres</span>
+                </button>
             </div>
         </div>
 
-        <!-- Vue des amis (cachée par défaut) -->
+        <!-- Vues des amis et des paramètres (toujours cachées initialement) -->
         <div id="friends-view" class="hidden flex-grow flex flex-col w-full h-full bg-white p-4">
             <h2 class="text-xl font-bold">Amis</h2>
             <p class="mt-4 text-gray-600">Cette section est en cours de développement.</p>
             <p id="user-id-display" class="mt-2 text-sm font-mono text-gray-500 truncate"></p>
         </div>
 
-        <!-- Vue des paramètres (cachée par défaut) -->
         <div id="settings-view" class="hidden flex-grow flex flex-col w-full h-full bg-white p-4">
             <h2 class="text-xl font-bold">Paramètres</h2>
             <p class="mt-4 text-gray-600">Cette section est en cours de développement.</p>
-        </div>
-
-        <!-- Menu du bas -->
-        <div class="fixed inset-x-0 bottom-0 bg-white shadow-lg p-4 flex justify-around items-center rounded-t-xl z-50">
-            <!-- Bouton Amis -->
-            <button id="friends-btn" class="menu-btn flex flex-col items-center text-gray-600 hover:text-purple-600 transition-colors duration-200 group">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 button-icon group-hover:text-purple-600 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-                </svg>
-                <span class="text-xs mt-1">Amis</span>
-            </button>
-            
-            <!-- Bouton Carte (au centre) -->
-            <button id="map-btn" class="menu-btn flex flex-col items-center text-gray-600 hover:text-blue-600 transition-colors duration-200 group">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 button-icon group-hover:text-blue-600 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 8c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm8.99 8.94c-1.32-1.34-3.1-2.28-5.11-2.58l.12-1.7c2.61.35 4.88 1.6 6.55 3.32-1.12.39-2.31.57-3.56.57-3.37 0-6.1-2.73-6.1-6.1s2.73-6.1 6.1-6.1c1.25 0 2.44.18 3.56.57-1.67 1.72-3.94 2.97-6.55 3.32l-.12 1.7c2.01.3 3.79 1.24 5.11 2.58.55-.26 1.05-.55 1.5-.86-2.5-2.6-6-4.43-10-5.12-1.63-.28-3.32-.42-5-.42-6.63 0-12 5.37-12 12s5.37 12 12 12c.98 0 1.96-.13 2.9-.39-3.41-1.66-6-4.52-7.58-8.08.38-.13.78-.23 1.18-.34z"/>
-                </svg>
-                <span class="text-xs mt-1">Carte</span>
-            </button>
-
-            <!-- Bouton Paramètres -->
-            <button id="settings-btn" class="menu-btn flex flex-col items-center text-gray-600 hover:text-gray-900 transition-colors duration-200 group">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 button-icon group-hover:text-gray-900 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M19.4 12c.42 0 .78.27.9.65L22 17.5c.12.38-.05.8-.43.99l-3.23 1.84c-.38.19-.84.07-1.1-.28l-.98-1.42c-.26-.37-.68-.58-1.13-.58H8.02c-.45 0-.87.21-1.13.58l-.98 1.42c-.26.37-.72.46-1.1.28L1.44 18.49c-.38-.19-.55-.61-.43-.99L3.5 12.65c.12-.38.48-.65.9-.65.45 0 .87.21 1.13.58l.98 1.42c.26.37.68.58 1.13.58h7.96c.45 0 .87-.21 1.13-.58l.98-1.42c.26-.37.72-.46 1.1-.28l3.23 1.84z"/>
-                </svg>
-                <span class="text-xs mt-1">Paramètres</span>
-            </button>
         </div>
 
     </div>
