@@ -161,7 +161,7 @@
     </style>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot, collection, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Globals and Configuration ---
@@ -185,6 +185,8 @@
             isMapReady: false,
             isFirebaseReady: false,
             attributionControl: null, // To hold the attribution control instance
+            tileLayers: {}, // To hold map tile layers
+            currentTileLayer: null, // To hold the current tile layer
         };
 
         // --- UI Elements ---
@@ -214,42 +216,72 @@
         // --- Initialization ---
         document.addEventListener('DOMContentLoaded', async () => {
             initMap();
-            await initFirebase();
-            setupEventListeners();
-            showView('map'); // Set initial view
+            try {
+                await initFirebase();
+                setupEventListeners();
+                // The view is now shown inside the functions that hide the loader
+            } catch (error) {
+                console.error("Fatal initialization error:", error);
+                showStatus("L'application n'a pas pu démarrer.", 'error');
+            }
         });
 
-        const initFirebase = async () => {
-            if (Object.keys(firebaseConfig).length === 0) {
-                showStatus("Configuration Firebase manquante.", 'error');
-                return;
-            }
-            try {
-                const app = initializeApp(firebaseConfig);
-                appState.auth = getAuth(app);
-                appState.db = getFirestore(app);
-
-                if (initialAuthToken) {
-                    await signInWithCustomToken(appState.auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(appState.auth);
+        const initFirebase = () => {
+            return new Promise((resolve, reject) => {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    return reject("Configuration Firebase manquante.");
                 }
-                appState.currentUser = appState.auth.currentUser;
-                appState.isFirebaseReady = true;
 
-                await checkUserSession();
-            } catch (error) {
-                console.error("Firebase Init Error:", error);
-                showStatus("Erreur de connexion.", 'error');
-            }
+                try {
+                    const app = initializeApp(firebaseConfig);
+                    appState.auth = getAuth(app);
+                    appState.db = getFirestore(app);
+
+                    const unsubscribe = onAuthStateChanged(appState.auth, async (user) => {
+                        unsubscribe(); // We only need to get the user once for initialization
+                        if (user) {
+                            appState.currentUser = user;
+                            appState.isFirebaseReady = true;
+                            await checkUserSession(); // This function will hide the loader
+                            resolve();
+                        } else {
+                            reject(new Error("Authentication failed, no user returned."));
+                        }
+                    }, (error) => {
+                        reject(error); // Handle errors during auth state observation
+                    });
+
+                    // Trigger the sign-in process
+                    if (initialAuthToken) {
+                        signInWithCustomToken(appState.auth, initialAuthToken).catch(reject);
+                    } else {
+                        signInAnonymously(appState.auth).catch(reject);
+                    }
+                } catch (error) {
+                    console.error("Firebase Init Error:", error);
+                    reject(error);
+                }
+            });
         };
 
         const initMap = () => {
             // Initialize map with attribution control disabled by default
             appState.map = L.map('map', { center: lyceeCenter, zoom: 19, zoomControl: false, attributionControl: false });
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            }).addTo(appState.map);
+
+            const attributionText = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+            
+            // Define tile layers
+            appState.tileLayers.withLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                attribution: attributionText
+            });
+            appState.tileLayers.withoutLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', {
+                attribution: attributionText
+            });
+
+            // Set the default layer (without labels)
+            appState.currentTileLayer = appState.tileLayers.withoutLabels;
+            appState.currentTileLayer.addTo(appState.map);
+            
             appState.isMapReady = true;
         };
         
@@ -262,14 +294,18 @@
                 appState.userName = data.name;
                 appState.isSharing = data.isSharing !== false; // Default to true if undefined
                 ui.shareLocationToggle.checked = appState.isSharing;
-                ui.loader.classList.add('hidden');
-                ui.appContainer.classList.remove('hidden');
                 
                 if (appState.isSharing) {
                     startLocationTracking();
                 }
                 listenToFriendLocations();
+                
+                // Show the main app
+                ui.loader.classList.add('hidden');
+                ui.appContainer.classList.remove('hidden');
+                showView('map');
             } else {
+                // Show the name modal
                 ui.loader.classList.add('hidden');
                 ui.nameModal.style.display = 'flex';
             }
@@ -284,6 +320,7 @@
                 ui.appContainer.classList.remove('hidden');
                 startLocationTracking();
                 listenToFriendLocations();
+                showView('map');
             } else {
                 showStatus("Veuillez entrer un prénom.", 'warning');
             }
@@ -434,19 +471,34 @@
             });
 
             ui.showAttributionToggle.addEventListener('change', (e) => {
-                const isVisible = e.target.checked;
-                if (isVisible) {
+                const showLabels = e.target.checked;
+                
+                // Remove the current layer
+                if (appState.currentTileLayer) {
+                    appState.map.removeLayer(appState.currentTileLayer);
+                }
+
+                if (showLabels) {
+                    // Add the layer with labels
+                    appState.currentTileLayer = appState.tileLayers.withLabels;
+                    
                     // Add attribution control if it doesn't exist
                     if (!appState.attributionControl) {
                         appState.attributionControl = L.control.attribution({ position: 'bottomleft' }).addTo(appState.map);
                     }
                 } else {
+                    // Add the layer without labels
+                    appState.currentTileLayer = appState.tileLayers.withoutLabels;
+
                     // Remove attribution control if it exists
                     if (appState.attributionControl) {
                         appState.map.removeControl(appState.attributionControl);
                         appState.attributionControl = null;
                     }
                 }
+                
+                // Add the new layer to the map
+                appState.currentTileLayer.addTo(appState.map);
             });
         };
 
@@ -557,8 +609,8 @@
                  <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mt-4">
                      <div class="flex items-center justify-between">
                          <div>
-                             <h3 class="font-semibold text-gray-700">Afficher la légende de la carte</h3>
-                             <p class="text-sm text-gray-500">Affiche les crédits (OpenStreetMap, etc.).</p>
+                             <h3 class="font-semibold text-gray-700">Noms des rues & Légende</h3>
+                             <p class="text-sm text-gray-500">Affiche les détails et les crédits.</p>
                          </div>
                          <label class="switch">
                              <input type="checkbox" id="show-attribution-toggle">
@@ -586,7 +638,7 @@
                 </button>
                 <button id="settings-btn-container" class="menu-btn-container">
                     <div class="menu-icon">
-                        <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.44,0.17-0.48,0.41L9.22,5.72C8.63,5.96,8.1,6.29,7.6,6.67L5.21,5.71C4.99,5.62,4.74,5.69,4.62,5.91L2.7,9.23 c-0.11,0.2-0.06,0.47,0.12,0.61L4.85,11.4c-0.05,0.3-0.07,0.62-0.07,0.94c0,0.32,0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.38,2.91 c0.04,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.48-0.41l0.38-2.91c0.59-0.24,1.12-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0.01,0.59-0.22l1.92-3.32c0.12-0.2,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+                        <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.44,0.17-0.48,0.41L9.22,5.72C8.63,5.96,8.1,6.29,7.6,6.67L5.21,5.71C4.99,5.62,4.74,5.69,4.62,5.91L2.7,9.23 c-0.11,0.2-0.06,0.47,0.12,0.61L4.85,11.4c-0.05,0.3-0.07,0.62-0.07,0.94c0,0.32,0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.38,2.91 c0.04,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17-0.48,0.41l0.38-2.91c0.59-0.24,1.12-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0.01,0.59-0.22l1.92-3.32c0.12-0.2,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
                     </div>
                     <span>Paramètres</span>
                 </button>
@@ -595,5 +647,4 @@
     </div>
 </body>
 </html>
-
 
