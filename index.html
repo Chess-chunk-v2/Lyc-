@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GéoLycée</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        .map-container {
+            position: relative;
+            width: 100%;
+            height: calc(100vh - 120px);
+            overflow: hidden; /* Prevent map container from overflowing */
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        /* Style pour réduire la taille de l'attribution Leaflet et la mettre en bas */
+        .leaflet-control-attribution {
+            font-size: 8px;
+            bottom: 0px;
+        }
+    </style>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables for Firebase initialization, provided by the canvas environment.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- Main Application Logic ---
+        let map;
+        let auth, db;
+        let currentUser;
+        let userMarker;
+        const friendMarkers = {};
+        let watchId;
+        const locationsCollectionRef = `artifacts/${appId}/public/data/locations`;
+
+        // Default coordinates for the Lycée de la plaine de l'Ain
+        const lyceeCenter = [45.962396815709305, 5.3472191143935595];
+        let currentView = 'map';
+
+        // Check if Firebase configuration is valid
+        if (Object.keys(firebaseConfig).length === 0) {
+            console.error("Firebase configuration is missing. The application will not work properly.");
+        }
+
+        // Initialize Firebase
+        const initFirebase = async () => {
+            try {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // Sign in the user
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                currentUser = auth.currentUser;
+                console.log("Firebase initialized and user signed in:", currentUser.uid);
+
+                // Start location tracking
+                startLocationTracking();
+                // Start listening to other users' locations
+                listenToFriendLocations();
+
+            } catch (error) {
+                console.error("Error initializing Firebase or signing in:", error);
+            }
+        };
+
+        // Initialize Map using Leaflet.js
+        function initMap() {
+            map = L.map('map', {
+                center: lyceeCenter,
+                zoom: 18,
+                minZoom: 14, // Allow more zoom out
+                dragging: true, // Allow user to move the map freely
+                keyboard: true
+            });
+
+            // Define map layers, with attribution removed as requested
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }).addTo(map);
+
+            console.log("Map initialized.");
+        }
+
+        // Watch for real-time location changes
+        const startLocationTracking = () => {
+            if ("geolocation" in navigator) {
+                watchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const { latitude, longitude } = position.coords;
+                        const userLocation = L.latLng(latitude, longitude);
+
+                        // Always update location and view
+                        updateUserLocation({ lat: latitude, lng: longitude });
+                        if (currentView === 'map') {
+                            map.setView(userLocation);
+                        }
+                        
+                        // Hide the status message
+                        document.getElementById('status').classList.add('hidden');
+
+                        if (!userMarker) {
+                            userMarker = L.circleMarker([latitude, longitude], {
+                                radius: 10,
+                                color: '#3B82F6',
+                                fillColor: '#3B82F6',
+                                fillOpacity: 1,
+                                weight: 1
+                            }).addTo(map);
+                        } else {
+                            userMarker.setLatLng([latitude, longitude]);
+                        }
+                    },
+                    (error) => {
+                        console.error("Error getting location:", error);
+                        document.getElementById('status').classList.remove('hidden');
+                        let statusMessage = "Une erreur de géolocalisation inconnue est survenue.";
+                        if (error && typeof error.code !== 'undefined') {
+                            if (error.code === 1) {
+                                statusMessage = "Accès à la position refusé. Veuillez l'autoriser dans les paramètres du navigateur.";
+                            } else if (error.code === 2) {
+                                statusMessage = "Position indisponible.";
+                            } else if (error.code === 3) {
+                                statusMessage = "Délai de géolocalisation dépassé.";
+                            }
+                        }
+                        document.getElementById('status').textContent = statusMessage;
+                    },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+                );
+            } else {
+                console.error("Geolocation is not supported by this browser.");
+                document.getElementById('status').classList.remove('hidden');
+                document.getElementById('status').textContent = "La géolocalisation n'est pas supportée.";
+            }
+        };
+
+        // Update user location in Firestore
+        const updateUserLocation = async (location) => {
+            if (!currentUser) return;
+            try {
+                const userDocRef = doc(db, locationsCollectionRef, currentUser.uid);
+                await setDoc(userDocRef, {
+                    lat: location.lat,
+                    lng: location.lng,
+                    timestamp: new Date(),
+                    isSharing: true,
+                });
+                console.log("Location updated in Firestore.");
+            } catch (e) {
+                console.error("Error updating location:", e);
+            }
+        };
+
+        // Listen for all location changes in the collection
+        const listenToFriendLocations = () => {
+            const locationsQuery = collection(db, locationsCollectionRef);
+            onSnapshot(locationsQuery, (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    const docData = change.doc.data();
+                    const friendId = change.doc.id;
+                    const { lat, lng } = docData;
+
+                    if (friendId === currentUser.uid) {
+                        return; // Don't process the current user's location
+                    }
+
+                    if (change.type === "added" || change.type === "modified") {
+                        const friendLocation = [lat, lng];
+
+                        if (friendMarkers[friendId]) {
+                            friendMarkers[friendId].setLatLng(friendLocation);
+                        } else {
+                            const customIcon = L.divIcon({
+                                className: 'custom-div-icon',
+                                html: '<svg viewBox="0 0 24 24" class="h-6 w-6 text-purple-600"><path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"></path></svg>',
+                                iconSize: [24, 24],
+                                iconAnchor: [12, 24]
+                            });
+                            friendMarkers[friendId] = L.marker(friendLocation, { icon: customIcon }).addTo(map);
+                        }
+                    } else if (change.type === "removed") {
+                        if (friendMarkers[friendId]) {
+                            map.removeLayer(friendMarkers[friendId]);
+                            delete friendMarkers[friendId];
+                        }
+                    }
+                });
+            });
+        };
+        
+        // Function to switch between views (map, friends, etc.)
+        const showView = (viewName) => {
+            currentView = viewName;
+            document.getElementById('map-view').classList.add('hidden');
+            document.getElementById('friends-view').classList.add('hidden');
+
+            if (viewName === 'map') {
+                document.getElementById('map-view').classList.remove('hidden');
+                // Ensure the map is resized correctly when the view is changed
+                setTimeout(() => map.invalidateSize(), 100);
+            } else if (viewName === 'friends') {
+                document.getElementById('friends-view').classList.remove('hidden');
+                if (currentUser && currentUser.uid) {
+                    document.getElementById('user-id-display').textContent = `Votre ID : ${currentUser.uid}`;
+                }
+            }
+        };
+
+        // Main app initialization on DOM content loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            initFirebase();
+            initMap();
+            // Attach event listeners for navigation buttons after the DOM is ready
+            document.getElementById('map-btn').addEventListener('click', () => {
+                showView('map');
+                map.setView(lyceeCenter, 18); // Recenter map on click
+            });
+            document.getElementById('friends-btn').addEventListener('click', () => {
+                showView('friends');
+            });
+        });
+    </script>
+</head>
+<body class="bg-gray-50 font-sans flex flex-col min-h-screen">
+    <div id="app" class="relative w-full h-full flex flex-col">
+
+        <!-- En-tête -->
+        <div class="bg-white shadow-lg p-4 flex items-center justify-center">
+            <h1 class="text-2xl font-bold text-center text-gray-800">GéoLycée</h1>
+        </div>
+        
+        <!-- Vue de la carte (visible par défaut) -->
+        <div id="map-view" class="flex-grow flex flex-col w-full h-full">
+            <div class="map-container flex-grow w-full rounded-lg shadow-inner border border-gray-200">
+                <div id="map"></div>
+            </div>
+            
+            <div id="status" class="hidden text-center text-sm font-medium p-3 rounded-lg bg-red-100 text-red-700 transition-opacity duration-300">
+                Une erreur de géolocalisation est survenue.
+            </div>
+        </div>
+
+        <!-- Vue des amis (cachée par défaut) -->
+        <div id="friends-view" class="hidden flex-grow flex flex-col w-full h-full bg-white p-4">
+            <h2 class="text-xl font-bold">Amis</h2>
+            <p class="mt-4 text-gray-600">Cette section est en cours de développement.</p>
+            <p id="user-id-display" class="mt-2 text-sm font-mono text-gray-500 truncate"></p>
+        </div>
+
+        <!-- Menu du bas -->
+        <div class="fixed inset-x-0 bottom-0 bg-white shadow-lg p-4 flex justify-around items-center rounded-t-xl z-50">
+            <button id="map-btn" class="flex flex-col items-center text-gray-600 hover:text-gray-900 transition-colors duration-200">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 8c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm8.99 8.94c-1.32-1.34-3.1-2.28-5.11-2.58l.12-1.7c2.61.35 4.88 1.6 6.55 3.32-1.12.39-2.31.57-3.56.57-3.37 0-6.1-2.73-6.1-6.1s2.73-6.1 6.1-6.1c1.25 0 2.44.18 3.56.57-1.67 1.72-3.94 2.97-6.55 3.32l-.12 1.7c2.01.3 3.79 1.24 5.11 2.58.55-.26 1.05-.55 1.5-.86-2.5-2.6-6-4.43-10-5.12-1.63-.28-3.32-.42-5-.42-6.63 0-12 5.37-12 12s5.37 12 12 12c.98 0 1.96-.13 2.9-.39-3.41-1.66-6-4.52-7.58-8.08.38-.13.78-.23 1.18-.34z"/>
+                </svg>
+                <span class="text-xs mt-1">Carte</span>
+            </button>
+
+            <button id="friends-btn" class="flex flex-col items-center text-gray-600 hover:text-gray-900 transition-colors duration-200">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </svg>
+                <span class="text-xs mt-1">Amis</span>
+            </button>
+        </div>
+
+    </div>
+</body>
+</html>
