@@ -67,6 +67,9 @@
             color: #333;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
+        .header-nav {
+            padding-top: 5rem; /* Espace pour le header fixe */
+        }
     </style>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -312,21 +315,34 @@
             });
         };
         
-        // Function to switch between views (map, friends, etc.)
+        // Function to switch between views (map, friends, etc.) and update active menu button style
         const showView = (viewName) => {
             currentView = viewName;
             document.getElementById('map-view').classList.add('hidden');
             document.getElementById('friends-view').classList.add('hidden');
             document.getElementById('settings-view').classList.add('hidden');
 
-            // Update active state of buttons
-            document.querySelectorAll('.menu-btn').forEach(btn => btn.classList.remove('text-blue-500'));
-
+            // Reset all menu button styles
+            document.querySelectorAll('.menu-btn-container').forEach(container => {
+                container.classList.remove('bg-white', 'shadow-md', 'scale-110');
+            });
+            document.querySelectorAll('.menu-icon').forEach(icon => {
+                icon.classList.remove('text-purple-600', 'text-blue-600', 'text-gray-900');
+                icon.classList.add('text-gray-600');
+            });
+            document.querySelectorAll('.menu-text').forEach(text => {
+                text.classList.remove('text-purple-600', 'text-blue-600', 'text-gray-900');
+                text.classList.add('text-gray-600');
+            });
+            
+            // Set styles for the active view
             if (viewName === 'map') {
                 document.getElementById('map-view').classList.remove('hidden');
-                document.getElementById('map-btn').classList.add('text-blue-500');
-                // The map view is always visible, so no need for invalidateSize
-                // on a hidden element. Instead, just center the map if needed.
+                document.getElementById('map-btn-container').classList.add('bg-white', 'shadow-md', 'scale-110');
+                document.getElementById('map-icon').classList.remove('text-gray-600');
+                document.getElementById('map-icon').classList.add('text-blue-600');
+                document.getElementById('map-text').classList.remove('text-gray-600');
+                document.getElementById('map-text').classList.add('text-blue-600');
                 if (userMarker) {
                     map.setView(userMarker.getLatLng());
                 } else {
@@ -334,13 +350,21 @@
                 }
             } else if (viewName === 'friends') {
                 document.getElementById('friends-view').classList.remove('hidden');
-                document.getElementById('friends-btn').classList.add('text-blue-500');
+                document.getElementById('friends-btn-container').classList.add('bg-white', 'shadow-md', 'scale-110');
+                document.getElementById('friends-icon').classList.remove('text-gray-600');
+                document.getElementById('friends-icon').classList.add('text-purple-600');
+                document.getElementById('friends-text').classList.remove('text-gray-600');
+                document.getElementById('friends-text').classList.add('text-purple-600');
                 if (currentUser && currentUser.uid) {
                     document.getElementById('user-id-display').textContent = `Votre ID : ${currentUser.uid}`;
                 }
             } else if (viewName === 'settings') {
                 document.getElementById('settings-view').classList.remove('hidden');
-                document.getElementById('settings-btn').classList.add('text-blue-500');
+                document.getElementById('settings-btn-container').classList.add('bg-white', 'shadow-md', 'scale-110');
+                document.getElementById('settings-icon').classList.remove('text-gray-600');
+                document.getElementById('settings-icon').classList.add('text-gray-900');
+                document.getElementById('settings-text').classList.remove('text-gray-600');
+                document.getElementById('settings-text').classList.add('text-gray-900');
             }
         };
 
@@ -349,13 +373,13 @@
             initFirebase();
             initMap();
             // Attach event listeners for navigation buttons after the DOM is ready
-            document.getElementById('map-btn').addEventListener('click', () => {
+            document.getElementById('map-btn-container').addEventListener('click', () => {
                 showView('map');
             });
-            document.getElementById('friends-btn').addEventListener('click', () => {
+            document.getElementById('friends-btn-container').addEventListener('click', () => {
                 showView('friends');
             });
-            document.getElementById('settings-btn').addEventListener('click', () => {
+            document.getElementById('settings-btn-container').addEventListener('click', () => {
                 showView('settings');
             });
 
@@ -379,58 +403,61 @@
     </div>
     
     <div id="app" class="relative w-full h-full flex flex-col">
-
-        <!-- En-tête -->
-        <div class="bg-white shadow-lg p-4 flex items-center justify-center z-40">
-            <h1 class="text-2xl font-bold text-center text-gray-800">GéoLycée</h1>
+        <!-- En-tête flottant -->
+        <div class="absolute top-0 inset-x-0 p-4 flex items-center justify-center z-50">
+            <div class="bg-white/80 backdrop-blur-md px-6 py-3 rounded-full shadow-lg">
+                <h1 class="text-2xl font-extrabold text-gray-800">GéoLycée</h1>
+            </div>
         </div>
-        
-        <!-- Vue principale (La carte) -->
-        <div id="map-view" class="flex-grow flex flex-col w-full h-full relative">
-            <div id="map" class="flex-grow w-full h-full"></div>
+
+        <!-- Les différentes vues de l'application -->
+        <div class="flex-grow w-full h-full relative p-4 pb-20 overflow-auto">
+            <!-- Vue de la carte -->
+            <div id="map-view" class="flex-grow flex flex-col w-full h-full relative hidden">
+                <div id="map" class="flex-grow w-full h-full"></div>
+                <div id="status" class="absolute top-4 left-1/2 -translate-x-1/2 hidden text-center text-sm font-medium p-3 rounded-lg bg-red-100 text-red-700 transition-opacity duration-300 z-30">
+                    Une erreur de géolocalisation est survenue.
+                </div>
+            </div>
+
+            <!-- Vues des amis et des paramètres -->
+            <div id="friends-view" class="flex-grow flex flex-col w-full h-full bg-white p-4 hidden">
+                <h2 class="text-xl font-bold">Amis</h2>
+                <p class="mt-4 text-gray-600">Cette section est en cours de développement.</p>
+                <p id="user-id-display" class="mt-2 text-sm font-mono text-gray-500 truncate"></p>
+            </div>
+
+            <div id="settings-view" class="flex-grow flex flex-col w-full h-full bg-white p-4 hidden">
+                <h2 class="text-xl font-bold">Paramètres</h2>
+                <p class="mt-4 text-gray-600">Cette section est en cours de développement.</p>
+            </div>
+        </div>
+
+        <!-- Menu du bas flottant -->
+        <div class="absolute inset-x-0 bottom-0 bg-white/80 backdrop-blur-md px-4 py-3 flex justify-around items-center rounded-t-3xl shadow-2xl z-50">
+            <!-- Bouton Amis -->
+            <button id="friends-btn-container" class="menu-btn-container flex flex-col items-center p-3 rounded-full transition-all duration-200">
+                <svg id="friends-icon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-600 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </svg>
+                <span id="friends-text" class="text-xs mt-1 text-gray-600">Amis</span>
+            </button>
             
-            <div id="status" class="absolute top-4 left-1/2 -translate-x-1/2 hidden text-center text-sm font-medium p-3 rounded-lg bg-red-100 text-red-700 transition-opacity duration-300 z-30">
-                Une erreur de géolocalisation est survenue.
-            </div>
+            <!-- Bouton Carte (au centre) -->
+            <button id="map-btn-container" class="menu-btn-container flex flex-col items-center p-3 rounded-full transition-all duration-200">
+                <svg id="map-icon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-600 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="6"/>
+                </svg>
+                <span id="map-text" class="text-xs mt-1 text-gray-600">Carte</span>
+            </button>
 
-            <!-- Menu du bas flottant -->
-            <div class="absolute inset-x-0 bottom-0 bg-white shadow-lg p-4 flex justify-around items-center rounded-t-xl z-50">
-                <!-- Bouton Amis -->
-                <button id="friends-btn" class="menu-btn flex flex-col items-center text-gray-600 hover:text-purple-600 transition-colors duration-200 group">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 button-icon group-hover:text-purple-600 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-                    </svg>
-                    <span class="text-xs mt-1">Amis</span>
-                </button>
-                
-                <!-- Bouton Carte (au centre) -->
-                <button id="map-btn" class="menu-btn flex flex-col items-center text-gray-600 hover:text-blue-600 transition-colors duration-200 group">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 button-icon group-hover:text-blue-600 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
-                        <circle cx="12" cy="12" r="6"/>
-                    </svg>
-                    <span class="text-xs mt-1">Carte</span>
-                </button>
-
-                <!-- Bouton Paramètres -->
-                <button id="settings-btn" class="menu-btn flex flex-col items-center text-gray-600 hover:text-gray-900 transition-colors duration-200 group">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 button-icon group-hover:text-gray-900 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M19.4 12c.42 0 .78.27.9.65L22 17.5c.12.38-.05.8-.43.99l-3.23 1.84c-.38.19-.84.07-1.1-.28l-.98-1.42c-.26-.37-.68-.58-1.13-.58H8.02c-.45 0-.87.21-1.13.58l-.98 1.42c-.26.37-.72.46-1.1.28L1.44 18.49c-.38-.19-.55-.61-.43-.99L3.5 12.65c.12-.38.48-.65.9-.65.45 0 .87.21 1.13.58l.98 1.42c.26.37.68.58 1.13.58h7.96c.45 0 .87-.21 1.13-.58l.98-1.42c.26-.37.72-.46 1.1-.28l3.23 1.84z"/>
-                    </svg>
-                    <span class="text-xs mt-1">Paramètres</span>
-                </button>
-            </div>
-        </div>
-
-        <!-- Vues des amis et des paramètres (toujours cachées initialement) -->
-        <div id="friends-view" class="hidden flex-grow flex flex-col w-full h-full bg-white p-4">
-            <h2 class="text-xl font-bold">Amis</h2>
-            <p class="mt-4 text-gray-600">Cette section est en cours de développement.</p>
-            <p id="user-id-display" class="mt-2 text-sm font-mono text-gray-500 truncate"></p>
-        </div>
-
-        <div id="settings-view" class="hidden flex-grow flex flex-col w-full h-full bg-white p-4">
-            <h2 class="text-xl font-bold">Paramètres</h2>
-            <p class="mt-4 text-gray-600">Cette section est en cours de développement.</p>
+            <!-- Bouton Paramètres -->
+            <button id="settings-btn-container" class="menu-btn-container flex flex-col items-center p-3 rounded-full transition-all duration-200">
+                <svg id="settings-icon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-600 transition-colors duration-200" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19.4 12c.42 0 .78.27.9.65L22 17.5c.12.38-.05.8-.43.99l-3.23 1.84c-.38.19-.84.07-1.1-.28l-.98-1.42c-.26-.37-.68-.58-1.13-.58H8.02c-.45 0-.87.21-1.13.58l-.98 1.42c-.26.37-.72.46-1.1.28L1.44 18.49c-.38-.19-.55-.61-.43-.99L3.5 12.65c.12-.38.48-.65.9-.65.45 0 .87.21 1.13.58l.98 1.42c.26.37.68.58 1.13.58h7.96c.45 0 .87-.21 1.13-.58l.98-1.42c.26-.37.72-.46 1.1-.28l3.23 1.84z"/>
+                </svg>
+                <span id="settings-text" class="text-xs mt-1 text-gray-600">Paramètres</span>
+            </button>
         </div>
 
     </div>
