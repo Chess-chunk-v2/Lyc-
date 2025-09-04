@@ -95,21 +95,20 @@
         const { createClient } = supabase;
 
         // --- VOS CLÉS SUPABASE ---
-        // REMPLACEZ CES VALEURS PAR CELLES DE VOTRE PROJET (Étape 4)
-        const SUPABASE_URL = 'https://yategsejbcdsqdbypgzc.supabase.co'; // ex: 'https://xyz.supabase.co'
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlhdGVnc2VqYmNkc3FkYnlwZ3pjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY5NTM0MjIsImV4cCI6MjA3MjUyOTQyMn0.R8vnc1mfbxFlNraqqDp082fxBomKIaTui_3YzZwUIQ0'; // ex: 'eyJ...'
+        const SUPABASE_URL = 'https://yategsejbcdsqdbypgzc.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlhdGVnc2VqYmNkc3FkYnlwZ3pjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY5NTM0MjIsImV4cCI6MjA3MjUyOTQyMn0.R8vnc1mfbxFlNraqqDp082fxBomKIaTui_3YzZwUIQ0';
         // -------------------------
 
-        // --- Globals and Configuration ---
         const lyceeCenter = [45.96239, 5.34721];
 
-        // --- Application State ---
         const appState = {
             map: null,
             supabase: null,
             currentUser: null,
             userMarker: null,
+            userAccuracyCircle: null,
             friendMarkers: {},
+            friends: {}, // Object to store friend IDs and names
             userName: "",
             isSharing: true,
             watchId: null,
@@ -119,7 +118,6 @@
             currentTileLayer: null,
         };
 
-        // --- UI Elements ---
         const ui = {
             loader: document.getElementById('loader'),
             appContainer: document.getElementById('app-container'),
@@ -139,11 +137,13 @@
             status: document.getElementById('status'),
             userIdDisplay: document.getElementById('user-id-display'),
             copyIdBtn: document.getElementById('copy-id-btn'),
+            addFriendInput: document.getElementById('add-friend-input'),
+            addFriendBtn: document.getElementById('add-friend-btn'),
+            friendsList: document.getElementById('friends-list'),
             shareLocationToggle: document.getElementById('share-location-toggle'),
             showAttributionToggle: document.getElementById('show-attribution-toggle'),
         };
         
-        // --- Initialization ---
         document.addEventListener('DOMContentLoaded', async () => {
             initMap();
             try {
@@ -168,21 +168,10 @@
         };
 
         const initSupabase = async () => {
-            if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL === 'VOTRE_URL_DE_PROJET') {
-                throw new Error("Les clés Supabase ne sont pas configurées dans le code HTML.");
-            }
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Les clés Supabase ne sont pas configurées.");
             appState.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-            // Check for existing user session or sign in anonymously
             const { data: { session } } = await appState.supabase.auth.getSession();
-            if (session) {
-                appState.currentUser = session.user;
-            } else {
-                const { data, error } = await appState.supabase.auth.signInAnonymously();
-                if (error) throw error;
-                appState.currentUser = data.user;
-            }
-
+            appState.currentUser = session ? session.user : (await appState.supabase.auth.signInAnonymously()).data.user;
             if (!appState.currentUser) throw new Error("Impossible d'authentifier l'utilisateur.");
             appState.isSupabaseReady = true;
             await checkUserSession();
@@ -190,29 +179,22 @@
 
         const initMap = () => {
             appState.map = L.map('map', { center: lyceeCenter, zoom: 19, zoomControl: false, attributionControl: false });
-            const attributionText = '&copy; OpenStreetMap &copy; CARTO';
-            appState.tileLayers.withLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: attributionText });
-            appState.tileLayers.withoutLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', { attribution: attributionText });
-            appState.currentTileLayer = appState.tileLayers.withoutLabels;
-            appState.currentTileLayer.addTo(appState.map);
+            const attr = '&copy; OpenStreetMap &copy; CARTO';
+            appState.tileLayers.withLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: attr });
+            appState.tileLayers.withoutLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', { attribution: attr });
+            appState.currentTileLayer = appState.tileLayers.withoutLabels.addTo(appState.map);
             appState.isMapReady = true;
         };
         
         const checkUserSession = async () => {
-            const { data, error } = await appState.supabase
-                .from('locations')
-                .select('name, is_sharing')
-                .eq('user_id', appState.currentUser.id)
-                .single();
-
+            const { data, error } = await appState.supabase.from('locations').select('name, is_sharing').eq('user_id', appState.currentUser.id).single();
             if (data && data.name) {
                 appState.userName = data.name;
                 appState.isSharing = data.is_sharing !== false;
                 ui.shareLocationToggle.checked = appState.isSharing;
-                
+                await fetchAndDisplayFriends();
                 if (appState.isSharing) startLocationTracking();
                 listenToFriendLocations();
-                
                 ui.loader.classList.add('hidden');
                 ui.appContainer.classList.remove('hidden');
                 showView('map');
@@ -226,10 +208,10 @@
             const name = ui.nameInput.value.trim();
             if (name) {
                 appState.userName = name;
-                // 'upsert' will insert or update the record.
                 await updateSupabaseLocation({ name: appState.userName, is_sharing: true });
                 ui.nameModal.style.display = 'none';
                 ui.appContainer.classList.remove('hidden');
+                await fetchAndDisplayFriends();
                 startLocationTracking();
                 listenToFriendLocations();
                 showView('map');
@@ -245,7 +227,7 @@
                 (pos) => {
                     ui.status.classList.add('hidden');
                     updateSupabaseLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude, is_sharing: true });
-                    updateUserMarker(pos.coords.latitude, pos.coords.longitude);
+                    updateUserMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
                 },
                 (err) => showStatus("Erreur de géolocalisation.", 'error'),
                 { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
@@ -264,8 +246,7 @@
         const updateSupabaseLocation = async (data) => {
             if (!appState.isSupabaseReady || !appState.currentUser) return;
             try {
-                const payload = { ...data, user_id: appState.currentUser.id, timestamp: new Date().toISOString() };
-                const { error } = await appState.supabase.from('locations').upsert(payload, { onConflict: 'user_id' });
+                const { error } = await appState.supabase.from('locations').upsert({ ...data, user_id: appState.currentUser.id, timestamp: new Date().toISOString() }, { onConflict: 'user_id' });
                 if (error) throw error;
             } catch (e) {
                 console.error("Supabase Update Error:", e);
@@ -273,7 +254,8 @@
             }
         };
 
-        const updateUserMarker = (lat, lng) => {
+        const updateUserMarker = (lat, lng, accuracy) => {
+            const latLng = [lat, lng];
             const userIcon = L.divIcon({
                 className: 'custom-user-icon',
                 html: `<div class="relative w-6 h-6 flex items-center justify-center"><div class="pulse-ring"></div><svg class="w-6 h-6 text-blue-500 filter drop-shadow-lg" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A10,10,0,1,0,22,12,10,10,0,0,0,12,2Zm0,18a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"/><circle cx="12" cy="12" r="5" fill="currentColor"/></svg></div>`,
@@ -281,11 +263,13 @@
             });
 
             if (!appState.userMarker) {
-                appState.userMarker = L.marker([lat, lng], { icon: userIcon, zIndexOffset: 1000 }).addTo(appState.map);
+                appState.userAccuracyCircle = L.circle(latLng, { radius: accuracy, color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.15, weight: 1 }).addTo(appState.map);
+                appState.userMarker = L.marker(latLng, { icon: userIcon, zIndexOffset: 1000 }).addTo(appState.map);
                 appState.userMarker.bindTooltip(appState.userName, { permanent: true, direction: 'top', offset: [0, -15], className: 'name-tooltip' }).openTooltip();
-                appState.map.setView([lat, lng], 18);
+                appState.map.setView(latLng, 18);
             } else {
-                appState.userMarker.setLatLng([lat, lng]);
+                appState.userMarker.setLatLng(latLng);
+                appState.userAccuracyCircle.setLatLng(latLng).setRadius(accuracy);
                 appState.userMarker.setTooltipContent(appState.userName);
             }
         };
@@ -294,8 +278,8 @@
             appState.supabase.channel('public:locations')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'locations' }, (payload) => {
                     const friendData = payload.new;
-                    if (!friendData || friendData.user_id === appState.currentUser.id) return;
-
+                    if (!friendData || friendData.user_id === appState.currentUser.id || !appState.friends[friendData.user_id]) return;
+                    
                     const friendId = friendData.user_id;
                     const shouldDisplay = friendData.is_sharing && friendData.lat && friendData.lng;
 
@@ -325,10 +309,81 @@
                 })
                 .subscribe();
         };
+
+        const addFriend = async () => {
+            const friendId = ui.addFriendInput.value.trim();
+            if (!friendId) return showStatus("Veuillez entrer un ID.", 'warning');
+            if (friendId === appState.currentUser.id) return showStatus("Vous ne pouvez pas vous ajouter vous-même.", 'warning');
+
+            // Check if friend exists
+            const { data: friendExists, error: checkError } = await appState.supabase.from('locations').select('name').eq('user_id', friendId).single();
+            if (checkError || !friendExists) return showStatus("Cet utilisateur n'existe pas.", 'error');
+
+            const { error } = await appState.supabase.from('friends').insert({ user_id: appState.currentUser.id, friend_id: friendId });
+            if (error) {
+                if (error.code === '23505') showStatus("Cet ami est déjà dans votre liste.", 'warning');
+                else showStatus("Erreur lors de l'ajout.", 'error');
+            } else {
+                showStatus(`${friendExists.name} a été ajouté(e) !`, 'success');
+                ui.addFriendInput.value = '';
+                await fetchAndDisplayFriends(); // Refresh the list
+            }
+        };
+
+        const fetchAndDisplayFriends = async () => {
+            const { data: friendRelations, error } = await appState.supabase.from('friends').select('friend_id').eq('user_id', appState.currentUser.id);
+            if (error) return console.error("Error fetching friends:", error);
+
+            const friendIds = friendRelations.map(r => r.friend_id);
+            if (friendIds.length === 0) {
+                renderFriendList();
+                return;
+            }
+
+            const { data: friendsData, error: namesError } = await appState.supabase.from('locations').select('user_id, name').in('user_id', friendIds);
+            if (namesError) return console.error("Error fetching friend names:", namesError);
+            
+            appState.friends = {}; // Reset friends list
+            friendsData.forEach(friend => {
+                appState.friends[friend.user_id] = friend.name;
+            });
+            renderFriendList();
+        };
+
+        const renderFriendList = () => {
+            ui.friendsList.innerHTML = ''; // Clear current list
+            const friendIds = Object.keys(appState.friends);
+
+            if (friendIds.length === 0) {
+                ui.friendsList.innerHTML = `<li class="text-center text-gray-500 py-4">Ajoutez des amis avec leur ID.</li>`;
+                return;
+            }
+
+            friendIds.forEach(id => {
+                const name = appState.friends[id];
+                const li = document.createElement('li');
+                li.className = 'flex items-center justify-between bg-white p-3 rounded-lg shadow-sm hover:bg-gray-50 cursor-pointer';
+                li.innerHTML = `<span class="font-medium text-gray-700">${name}</span><svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>`;
+                li.addEventListener('click', () => centerOnFriend(id));
+                ui.friendsList.appendChild(li);
+            });
+        };
+
+        const centerOnFriend = (friendId) => {
+            const friendMarker = appState.friendMarkers[friendId];
+            if (friendMarker) {
+                showView('map');
+                appState.map.setView(friendMarker.getLatLng(), 18, { animate: true, pan: { duration: 1 } });
+                showStatus(`Centrage sur ${appState.friends[friendId]}`, 'info');
+            } else {
+                showStatus(`${appState.friends[friendId]} ne partage pas sa position.`, 'warning');
+            }
+        };
         
         const setupEventListeners = () => {
             ui.saveNameBtn.addEventListener('click', saveUserName);
             ui.nameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') saveUserName(); });
+            ui.addFriendBtn.addEventListener('click', addFriend);
             
             ui.buttons.friends.addEventListener('click', () => showView('friends'));
             ui.buttons.settings.addEventListener('click', () => showView('settings'));
@@ -371,7 +426,10 @@
             ui.buttons[viewName].classList.add('active-menu');
             
             if (viewName === 'map') appState.map.invalidateSize();
-            if (viewName === 'friends') ui.userIdDisplay.textContent = appState.currentUser ? appState.currentUser.id : "...";
+            if (viewName === 'friends') {
+                ui.userIdDisplay.textContent = appState.currentUser ? appState.currentUser.id : "...";
+                fetchAndDisplayFriends();
+            }
         };
 
         const showStatus = (message, type = 'info') => {
@@ -423,46 +481,67 @@
                 <div id="status" class="hidden"></div>
             </div>
             <div id="friends-view" class="w-full h-full bg-gray-50 p-6 pt-24 overflow-y-auto hidden">
-                <h2 class="text-3xl font-bold text-gray-800 mb-6">Amis</h2>
-                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                    <h3 class="font-semibold text-gray-700 mb-2">Partagez votre ID</h3>
-                    <p class="text-sm text-gray-500 mb-3">Donnez cet ID unique à vos amis.</p>
-                    <div class="flex items-center gap-2 bg-gray-100 p-2 rounded-lg">
-                        <p id="user-id-display" class="text-xs font-mono text-gray-600 truncate flex-grow"></p>
-                        <button id="copy-id-btn" class="bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600 transition active:scale-95">
-                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                        </button>
+                <div class="max-w-md mx-auto">
+                    <h2 class="text-3xl font-bold text-gray-800 mb-6">Amis</h2>
+                    
+                    <!-- Add Friend Section -->
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6">
+                        <h3 class="font-semibold text-gray-700 mb-2">Ajouter un ami</h3>
+                        <div class="flex items-center gap-2">
+                            <input id="add-friend-input" type="text" placeholder="Collez l'ID de votre ami..." class="flex-grow p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                            <button id="add-friend-btn" class="bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600 transition active:scale-95">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Friend List -->
+                    <div>
+                        <h3 class="font-semibold text-gray-700 mb-3">Ma liste d'amis</h3>
+                        <ul id="friends-list" class="space-y-2">
+                            <!-- Friends will be dynamically inserted here -->
+                        </ul>
+                    </div>
+
+                    <!-- Share ID Section -->
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mt-8">
+                        <h3 class="font-semibold text-gray-700 mb-2">Votre ID de partage</h3>
+                        <p class="text-sm text-gray-500 mb-3">Donnez cet ID unique à vos amis pour qu'ils vous ajoutent.</p>
+                        <div class="flex items-center gap-2 bg-gray-100 p-2 rounded-lg">
+                            <p id="user-id-display" class="text-xs font-mono text-gray-600 truncate flex-grow"></p>
+                            <button id="copy-id-btn" class="bg-gray-200 text-gray-700 p-2 rounded-md hover:bg-gray-300 transition active:scale-95">
+                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
-                 <div class="text-center mt-12">
-                     <svg class="w-16 h-16 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                     <p class="mt-4 text-gray-500">La liste d'amis sera bientôt disponible.</p>
-                 </div>
             </div>
             <div id="settings-view" class="w-full h-full bg-gray-50 p-6 pt-24 overflow-y-auto hidden">
-                 <h2 class="text-3xl font-bold text-gray-800 mb-6">Paramètres</h2>
-                 <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                     <div class="flex items-center justify-between">
-                         <div>
-                             <h3 class="font-semibold text-gray-700">Partager ma position</h3>
-                             <p class="text-sm text-gray-500">Permet à vos amis de voir votre position.</p>
+                 <div class="max-w-md mx-auto">
+                    <h2 class="text-3xl font-bold text-gray-800 mb-6">Paramètres</h2>
+                     <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                         <div class="flex items-center justify-between">
+                             <div>
+                                 <h3 class="font-semibold text-gray-700">Partager ma position</h3>
+                                 <p class="text-sm text-gray-500">Permet à vos amis de voir votre position.</p>
+                             </div>
+                             <label class="switch">
+                                 <input type="checkbox" id="share-location-toggle" checked>
+                                 <span class="slider"></span>
+                             </label>
                          </div>
-                         <label class="switch">
-                             <input type="checkbox" id="share-location-toggle" checked>
-                             <span class="slider"></span>
-                         </label>
                      </div>
-                 </div>
-                 <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mt-4">
-                     <div class="flex items-center justify-between">
-                         <div>
-                             <h3 class="font-semibold text-gray-700">Noms des rues & Légende</h3>
-                             <p class="text-sm text-gray-500">Affiche les détails et les crédits.</p>
+                     <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mt-4">
+                         <div class="flex items-center justify-between">
+                             <div>
+                                 <h3 class="font-semibold text-gray-700">Noms des rues & Légende</h3>
+                                 <p class="text-sm text-gray-500">Affiche les détails et les crédits.</p>
+                             </div>
+                             <label class="switch">
+                                 <input type="checkbox" id="show-attribution-toggle">
+                                 <span class="slider"></span>
+                             </label>
                          </div>
-                         <label class="switch">
-                             <input type="checkbox" id="show-attribution-toggle">
-                             <span class="slider"></span>
-                         </label>
                      </div>
                  </div>
             </div>
@@ -493,5 +572,4 @@
     </div>
 </body>
 </html>
-
 
