@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Import Supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         /* Ensures the app takes the full screen without overflow */
         body, html {
@@ -16,22 +18,11 @@
             overflow: hidden;
             font-family: 'Inter', sans-serif;
         }
-
-        /* Use Inter font from Google Fonts */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
-
         #map {
             height: 100%;
             width: 100%;
-            background-color: #f0f0f0; /* Map background color before tiles load */
-        }
-        
-        /* Custom styles for Leaflet UI elements */
-        .leaflet-control-attribution {
-            font-size: 10px !important;
-        }
-        .leaflet-control-zoom {
-            border-radius: 12px;
+            background-color: #f0f0f0;
         }
         .leaflet-tooltip.name-tooltip {
             background-color: rgba(255, 255, 255, 0.9);
@@ -43,8 +34,6 @@
             color: #333;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         }
-
-        /* Pulsing animation for the user's marker */
         @keyframes pulse {
             0% { transform: scale(1); opacity: 1; }
             70% { transform: scale(3); opacity: 0; }
@@ -63,119 +52,61 @@
             z-index: -1;
             transform: translate(-50%, -50%);
         }
-
-        /* Custom switch toggle for settings */
         .switch {
             position: relative;
             display: inline-block;
             width: 48px;
             height: 28px;
         }
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
+        .switch input { opacity: 0; width: 0; height: 0; }
         .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 28px;
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .4s; border-radius: 28px;
         }
         .slider:before {
-            position: absolute;
-            content: "";
-            height: 20px;
-            width: 20px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
+            position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px;
+            background-color: white; transition: .4s; border-radius: 50%;
         }
-        input:checked + .slider {
-            background-color: #3B82F6;
-        }
-        input:checked + .slider:before {
-            transform: translateX(20px);
-        }
-
-        /* --- Bottom Navigation Bar --- */
+        input:checked + .slider { background-color: #3B82F6; }
+        input:checked + .slider:before { transform: translateX(20px); }
         .bottom-nav {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background-color: white;
-            border-top: 1px solid #e5e7eb;
-            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05);
-            z-index: 1000;
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background-color: white; border-top: 1px solid #e5e7eb;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05); z-index: 1000;
         }
         .nav-content {
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            max-width: 448px; /* max-w-md */
-            margin-left: auto;
-            margin-right: auto;
-            padding: 0.5rem 1rem; /* py-2 px-4 */
+            display: flex; justify-content: space-around; align-items: center;
+            max-width: 448px; margin-left: auto; margin-right: auto; padding: 0.5rem 1rem;
         }
         .menu-btn-container { 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            padding: 0.25rem;
-            border-radius: 12px; 
-            transition: all 0.2s ease-in-out; 
-            color: #4B5563; /* text-gray-600 */
-            width: 72px; /* Increased width for better touch targets */
-            height: 64px;
-            justify-content: center;
+            display: flex; flex-direction: column; align-items: center; 
+            padding: 0.25rem; border-radius: 12px; transition: all 0.2s ease-in-out; 
+            color: #4B5563; width: 72px; height: 64px; justify-content: center;
         }
-        .menu-btn-container.active-menu { 
-            color: #4338CA; /* text-indigo-700 */
-        }
-        .menu-btn-container.active-menu .menu-icon {
-            transform: scale(1.2) translateY(-2px);
-            background-color: #E0E7FF; /* bg-indigo-100 */
-        }
+        .menu-btn-container.active-menu { color: #4338CA; }
+        .menu-btn-container.active-menu .menu-icon { transform: scale(1.2) translateY(-2px); background-color: #E0E7FF; }
         .menu-btn-container span { 
-            font-size: 0.75rem; /* text-xs */
-            margin-top: 0.3rem; 
-            font-weight: 600; 
-            transition: opacity 0.2s ease-in-out;
+            font-size: 0.75rem; margin-top: 0.3rem; font-weight: 600; transition: opacity 0.2s ease-in-out;
         }
-        .menu-btn-container:not(.active-menu) span {
-            opacity: 0;
-        }
-        .menu-icon {
-            padding: 0.75rem; /* p-3 */
-            border-radius: 9999px;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
+        .menu-btn-container:not(.active-menu) span { opacity: 0; }
+        .menu-icon { padding: 0.75rem; border-radius: 9999px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
     </style>
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        const { createClient } = supabase;
+
+        // --- VOS CLÉS SUPABASE ---
+        // REMPLACEZ CES VALEURS PAR CELLES DE VOTRE PROJET (Étape 4)
+        const SUPABASE_URL = 'https://yategsejbcdsqdbypgzc.supabase.co'; // ex: 'https://xyz.supabase.co'
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlhdGVnc2VqYmNkc3FkYnlwZ3pjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY5NTM0MjIsImV4cCI6MjA3MjUyOTQyMn0.R8vnc1mfbxFlNraqqDp082fxBomKIaTui_3YzZwUIQ0'; // ex: 'eyJ...'
+        // -------------------------
 
         // --- Globals and Configuration ---
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'geolycee-dev';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-        const locationsCollectionRef = `artifacts/${appId}/public/data/locations`;
-        const lyceeCenter = [45.96239, 5.34721]; // Lycée de la plaine de l'Ain
+        const lyceeCenter = [45.96239, 5.34721];
 
         // --- Application State ---
         const appState = {
             map: null,
-            auth: null,
-            db: null,
+            supabase: null,
             currentUser: null,
             userMarker: null,
             friendMarkers: {},
@@ -183,10 +114,9 @@
             isSharing: true,
             watchId: null,
             isMapReady: false,
-            isFirebaseReady: false,
-            attributionControl: null, // To hold the attribution control instance
-            tileLayers: {}, // To hold map tile layers
-            currentTileLayer: null, // To hold the current tile layer
+            isSupabaseReady: false,
+            tileLayers: {},
+            currentTileLayer: null,
         };
 
         // --- UI Elements ---
@@ -217,129 +147,76 @@
         document.addEventListener('DOMContentLoaded', async () => {
             initMap();
             try {
-                // First, ask for geolocation and wait for the user's response.
                 await requestGeolocationPermission();
-                
-                // Only if geolocation is granted, proceed with Firebase.
-                await initFirebase();
-                
+                await initSupabase();
                 setupEventListeners();
-                // The view is now shown inside checkUserSession, which is called by initFirebase
             } catch (error) {
                 console.error("Fatal initialization error:", error);
-                // Display the error on the loader screen itself
                 const loader = document.getElementById('loader');
-                loader.innerHTML = `
-                    <div class="text-center p-4">
-                        <svg class="w-16 h-16 text-red-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        <p class="mt-4 text-gray-700 font-semibold">Erreur d'Initialisation</p>
-                        <p class="mt-2 text-gray-600 text-center max-w-xs">${error}</p>
-                    </div>
-                `;
+                loader.innerHTML = `<div class="text-center p-4"><p class="mt-4 text-gray-700 font-semibold">Erreur d'Initialisation</p><p class="mt-2 text-gray-600">${error}</p></div>`;
             }
         });
 
         const requestGeolocationPermission = () => {
             return new Promise((resolve, reject) => {
-                if (!("geolocation" in navigator)) {
-                    return reject("La géolocalisation n'est pas supportée par votre navigateur.");
-                }
-                // This will trigger the permission prompt
-                navigator.geolocation.getCurrentPosition(
-                    (position) => resolve(position), // Success
-                    (error) => { // Error
-                        const messages = {
-                            1: "Accès refusé. Veuillez autoriser la géolocalisation dans les paramètres de votre navigateur pour utiliser l'application.",
-                            2: "Position indisponible. Veuillez vérifier vos paramètres de localisation.",
-                            3: "Délai de recherche dépassé.",
-                        };
-                        reject(messages[error.code] || "Une erreur de géolocalisation est survenue.");
-                    },
-                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-                );
+                if (!("geolocation" in navigator)) return reject("Géolocalisation non supportée.");
+                navigator.geolocation.getCurrentPosition(resolve, (error) => {
+                    const messages = { 1: "Accès refusé. Veuillez l'autoriser.", 2: "Position indisponible.", 3: "Délai dépassé." };
+                    reject(messages[error.code] || "Erreur de géolocalisation.");
+                }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
             });
         };
 
-        const initFirebase = () => {
-            return new Promise((resolve, reject) => {
-                if (Object.keys(firebaseConfig).length === 0) {
-                    return reject("Configuration Firebase manquante.");
-                }
+        const initSupabase = async () => {
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL === 'VOTRE_URL_DE_PROJET') {
+                throw new Error("Les clés Supabase ne sont pas configurées dans le code HTML.");
+            }
+            appState.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-                try {
-                    const app = initializeApp(firebaseConfig);
-                    appState.auth = getAuth(app);
-                    appState.db = getFirestore(app);
+            // Check for existing user session or sign in anonymously
+            const { data: { session } } = await appState.supabase.auth.getSession();
+            if (session) {
+                appState.currentUser = session.user;
+            } else {
+                const { data, error } = await appState.supabase.auth.signInAnonymously();
+                if (error) throw error;
+                appState.currentUser = data.user;
+            }
 
-                    const unsubscribe = onAuthStateChanged(appState.auth, async (user) => {
-                        unsubscribe(); // We only need to get the user once for initialization
-                        if (user) {
-                            appState.currentUser = user;
-                            appState.isFirebaseReady = true;
-                            await checkUserSession(); // This function will hide the loader
-                            resolve();
-                        } else {
-                            reject(new Error("Authentication failed, no user returned."));
-                        }
-                    }, (error) => {
-                        reject(error); // Handle errors during auth state observation
-                    });
-
-                    // Trigger the sign-in process
-                    if (initialAuthToken) {
-                        signInWithCustomToken(appState.auth, initialAuthToken).catch(reject);
-                    } else {
-                        signInAnonymously(appState.auth).catch(reject);
-                    }
-                } catch (error) {
-                    console.error("Firebase Init Error:", error);
-                    reject(error);
-                }
-            });
+            if (!appState.currentUser) throw new Error("Impossible d'authentifier l'utilisateur.");
+            appState.isSupabaseReady = true;
+            await checkUserSession();
         };
 
         const initMap = () => {
-            // Initialize map with attribution control disabled by default
             appState.map = L.map('map', { center: lyceeCenter, zoom: 19, zoomControl: false, attributionControl: false });
-
-            const attributionText = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
-            
-            // Define tile layers
-            appState.tileLayers.withLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                attribution: attributionText
-            });
-            appState.tileLayers.withoutLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', {
-                attribution: attributionText
-            });
-
-            // Set the default layer (without labels)
+            const attributionText = '&copy; OpenStreetMap &copy; CARTO';
+            appState.tileLayers.withLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: attributionText });
+            appState.tileLayers.withoutLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', { attribution: attributionText });
             appState.currentTileLayer = appState.tileLayers.withoutLabels;
             appState.currentTileLayer.addTo(appState.map);
-            
             appState.isMapReady = true;
         };
         
-        // --- User Session & Data ---
         const checkUserSession = async () => {
-            const userDocRef = doc(appState.db, locationsCollectionRef, appState.currentUser.uid);
-            const userDoc = await getDoc(userDocRef);
-            if (userDoc.exists() && userDoc.data().name) {
-                const data = userDoc.data();
+            const { data, error } = await appState.supabase
+                .from('locations')
+                .select('name, is_sharing')
+                .eq('user_id', appState.currentUser.id)
+                .single();
+
+            if (data && data.name) {
                 appState.userName = data.name;
-                appState.isSharing = data.isSharing !== false; // Default to true if undefined
+                appState.isSharing = data.is_sharing !== false;
                 ui.shareLocationToggle.checked = appState.isSharing;
                 
-                if (appState.isSharing) {
-                    startLocationTracking();
-                }
+                if (appState.isSharing) startLocationTracking();
                 listenToFriendLocations();
                 
-                // Show the main app
                 ui.loader.classList.add('hidden');
                 ui.appContainer.classList.remove('hidden');
                 showView('map');
             } else {
-                // Show the name modal
                 ui.loader.classList.add('hidden');
                 ui.nameModal.style.display = 'flex';
             }
@@ -349,7 +226,8 @@
             const name = ui.nameInput.value.trim();
             if (name) {
                 appState.userName = name;
-                await updateFirestoreLocation({ name: appState.userName, isSharing: true });
+                // 'upsert' will insert or update the record.
+                await updateSupabaseLocation({ name: appState.userName, is_sharing: true });
                 ui.nameModal.style.display = 'none';
                 ui.appContainer.classList.remove('hidden');
                 startLocationTracking();
@@ -360,61 +238,42 @@
             }
         };
 
-        // --- Location Tracking ---
         const startLocationTracking = () => {
             if (appState.watchId !== null) return;
-            if ("geolocation" in navigator) {
-                showStatus("Recherche de votre position...", 'info');
-                appState.watchId = navigator.geolocation.watchPosition(
-                    positionSuccess,
-                    positionError,
-                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-                );
-            } else {
-                showStatus("Géolocalisation non supportée.", 'error');
-            }
+            showStatus("Recherche de votre position...", 'info');
+            appState.watchId = navigator.geolocation.watchPosition(
+                (pos) => {
+                    ui.status.classList.add('hidden');
+                    updateSupabaseLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude, is_sharing: true });
+                    updateUserMarker(pos.coords.latitude, pos.coords.longitude);
+                },
+                (err) => showStatus("Erreur de géolocalisation.", 'error'),
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
         };
 
         const stopLocationTracking = async () => {
             if (appState.watchId !== null) {
                 navigator.geolocation.clearWatch(appState.watchId);
                 appState.watchId = null;
-                await updateFirestoreLocation({ isSharing: false });
+                await updateSupabaseLocation({ is_sharing: false });
                 showStatus("Partage de position arrêté.", 'info');
             }
         };
 
-        const positionSuccess = (position) => {
-            ui.status.classList.add('hidden');
-            const { latitude, longitude } = position.coords;
-            updateFirestoreLocation({ lat: latitude, lng: longitude, isSharing: true });
-            updateUserMarker(latitude, longitude);
-        };
-
-        const positionError = (error) => {
-            const messages = {
-                1: "Accès refusé. Veuillez autoriser la géolocalisation.",
-                2: "Position indisponible.",
-                3: "Délai de recherche dépassé.",
-            };
-            showStatus(messages[error.code] || "Erreur de géolocalisation.", 'error');
-        };
-        
-        // --- Firestore & Map Markers ---
-        const updateFirestoreLocation = async (data) => {
-            if (!appState.isFirebaseReady || !appState.currentUser) return;
+        const updateSupabaseLocation = async (data) => {
+            if (!appState.isSupabaseReady || !appState.currentUser) return;
             try {
-                const userDocRef = doc(appState.db, locationsCollectionRef, appState.currentUser.uid);
-                const payload = { ...data, timestamp: new Date() };
-                await setDoc(userDocRef, payload, { merge: true });
+                const payload = { ...data, user_id: appState.currentUser.id, timestamp: new Date().toISOString() };
+                const { error } = await appState.supabase.from('locations').upsert(payload, { onConflict: 'user_id' });
+                if (error) throw error;
             } catch (e) {
-                console.error("Firestore Update Error:", e);
+                console.error("Supabase Update Error:", e);
                 showStatus("Erreur de synchronisation.", 'error');
             }
         };
 
         const updateUserMarker = (lat, lng) => {
-            if (!appState.isMapReady) return;
             const userIcon = L.divIcon({
                 className: 'custom-user-icon',
                 html: `<div class="relative w-6 h-6 flex items-center justify-center"><div class="pulse-ring"></div><svg class="w-6 h-6 text-blue-500 filter drop-shadow-lg" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A10,10,0,1,0,22,12,10,10,0,0,0,12,2Zm0,18a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"/><circle cx="12" cy="12" r="5" fill="currentColor"/></svg></div>`,
@@ -432,107 +291,75 @@
         };
 
         const listenToFriendLocations = () => {
-            const q = collection(appState.db, locationsCollectionRef);
-            onSnapshot(q, (snapshot) => {
-                snapshot.docChanges().forEach((change) => {
-                    const friendId = change.doc.id;
-                    const data = change.doc.data();
-                    
-                    if (friendId === appState.currentUser?.uid) return;
+            appState.supabase.channel('public:locations')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'locations' }, (payload) => {
+                    const friendData = payload.new;
+                    if (!friendData || friendData.user_id === appState.currentUser.id) return;
 
-                    const shouldDisplay = data.isSharing && data.lat && data.lng;
+                    const friendId = friendData.user_id;
+                    const shouldDisplay = friendData.is_sharing && friendData.lat && friendData.lng;
 
-                    if (change.type === "removed" || !shouldDisplay) {
+                    if (!shouldDisplay) {
                         if (appState.friendMarkers[friendId]) {
                             appState.map.removeLayer(appState.friendMarkers[friendId]);
                             delete appState.friendMarkers[friendId];
                         }
                         return;
                     }
-                    
-                    if (change.type === "added" || change.type === "modified") {
-                         const friendIcon = L.divIcon({
-                            className: 'custom-friend-icon',
-                            html: `<svg class="w-8 h-8 text-purple-700 filter drop-shadow-md" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z"/></svg>`,
-                            iconSize: [32, 32], iconAnchor: [16, 32]
-                        });
-                        if (appState.friendMarkers[friendId]) {
-                            appState.friendMarkers[friendId].setLatLng([data.lat, data.lng]);
-                            appState.friendMarkers[friendId].setTooltipContent(data.name || 'Ami');
-                        } else {
-                            appState.friendMarkers[friendId] = L.marker([data.lat, data.lng], { icon: friendIcon })
-                                .addTo(appState.map)
-                                .bindTooltip(data.name || 'Ami', { permanent: true, direction: 'top', offset: [0, -35], className: 'name-tooltip' })
-                                .openTooltip();
-                        }
+
+                    const friendIcon = L.divIcon({
+                        className: 'custom-friend-icon',
+                        html: `<svg class="w-8 h-8 text-purple-700 filter drop-shadow-md" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z"/></svg>`,
+                        iconSize: [32, 32], iconAnchor: [16, 32]
+                    });
+
+                    if (appState.friendMarkers[friendId]) {
+                        appState.friendMarkers[friendId].setLatLng([friendData.lat, friendData.lng]);
+                        appState.friendMarkers[friendId].setTooltipContent(friendData.name || 'Ami');
+                    } else {
+                        appState.friendMarkers[friendId] = L.marker([friendData.lat, friendData.lng], { icon: friendIcon })
+                            .addTo(appState.map)
+                            .bindTooltip(friendData.name || 'Ami', { permanent: true, direction: 'top', offset: [0, -35], className: 'name-tooltip' })
+                            .openTooltip();
                     }
-                });
-            });
+                })
+                .subscribe();
         };
         
-        // --- UI Logic & Event Handlers ---
         const setupEventListeners = () => {
             ui.saveNameBtn.addEventListener('click', saveUserName);
             ui.nameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') saveUserName(); });
             
-            // Navigation buttons
             ui.buttons.friends.addEventListener('click', () => showView('friends'));
             ui.buttons.settings.addEventListener('click', () => showView('settings'));
             ui.buttons.map.addEventListener('click', () => {
                 if (!ui.views.map.classList.contains('hidden')) {
-                    // If already on map view, reset to the default high school view
                     appState.map.setView(lyceeCenter, 19, { animate: true, pan: { duration: 1 } });
                     showStatus("Vue réinitialisée sur le lycée", 'info');
                 } else {
-                    // Otherwise, just switch to the map view
                     showView('map');
                 }
             });
 
             ui.copyIdBtn.addEventListener('click', () => {
-                navigator.clipboard.writeText(appState.currentUser.uid).then(() => {
+                navigator.clipboard.writeText(appState.currentUser.id).then(() => {
                     showStatus("ID copié dans le presse-papiers !", 'success');
                 });
             });
             
             ui.shareLocationToggle.addEventListener('change', (e) => {
                 appState.isSharing = e.target.checked;
-                if (appState.isSharing) {
-                    startLocationTracking();
-                } else {
-                    stopLocationTracking();
-                }
+                if (appState.isSharing) startLocationTracking();
+                else stopLocationTracking();
             });
 
             ui.showAttributionToggle.addEventListener('change', (e) => {
                 const showLabels = e.target.checked;
-                
-                // Remove the current layer
-                if (appState.currentTileLayer) {
-                    appState.map.removeLayer(appState.currentTileLayer);
-                }
-
-                if (showLabels) {
-                    // Add the layer with labels
-                    appState.currentTileLayer = appState.tileLayers.withLabels;
-                    
-                    // Add attribution control if it doesn't exist
-                    if (!appState.attributionControl) {
-                        appState.attributionControl = L.control.attribution({ position: 'bottomleft' }).addTo(appState.map);
-                    }
-                } else {
-                    // Add the layer without labels
-                    appState.currentTileLayer = appState.tileLayers.withoutLabels;
-
-                    // Remove attribution control if it exists
-                    if (appState.attributionControl) {
-                        appState.map.removeControl(appState.attributionControl);
-                        appState.attributionControl = null;
-                    }
-                }
-                
-                // Add the new layer to the map
+                appState.map.removeLayer(appState.currentTileLayer);
+                appState.currentTileLayer = showLabels ? appState.tileLayers.withLabels : appState.tileLayers.withoutLabels;
                 appState.currentTileLayer.addTo(appState.map);
+                if(showLabels) L.control.attribution({ position: 'bottomleft' }).addTo(appState.map);
+                else if (appState.map.attributionControl) appState.map.removeControl(appState.map.attributionControl);
             });
         };
 
@@ -543,28 +370,20 @@
             document.querySelectorAll('.menu-btn-container').forEach(el => el.classList.remove('active-menu'));
             ui.buttons[viewName].classList.add('active-menu');
             
-            // Special handling for views
-            if (viewName === 'map' && appState.isMapReady) {
-                appState.map.invalidateSize(); // Fixes map rendering issues when container is hidden
-            }
-            if (viewName === 'friends') {
-                ui.userIdDisplay.textContent = appState.currentUser ? appState.currentUser.uid : "Chargement...";
-            }
+            if (viewName === 'map') appState.map.invalidateSize();
+            if (viewName === 'friends') ui.userIdDisplay.textContent = appState.currentUser ? appState.currentUser.id : "...";
         };
 
         const showStatus = (message, type = 'info') => {
             const colors = {
-                info: 'bg-blue-100 text-blue-800',
-                success: 'bg-green-100 text-green-800',
-                warning: 'bg-yellow-100 text-yellow-800',
-                error: 'bg-red-100 text-red-800',
+                info: 'bg-blue-100 text-blue-800', success: 'bg-green-100 text-green-800',
+                warning: 'bg-yellow-100 text-yellow-800', error: 'bg-red-100 text-red-800',
             };
             ui.status.textContent = message;
             ui.status.className = `absolute top-4 left-1/2 -translate-x-1/2 text-center text-sm font-medium p-3 rounded-xl shadow-lg transition-all duration-300 z-[1001] ${colors[type]}`;
             ui.status.classList.remove('hidden');
             setTimeout(() => ui.status.classList.add('hidden'), 3000);
         };
-
     </script>
 </head>
 <body class="bg-gray-100 antialiased">
@@ -592,27 +411,22 @@
 
     <!-- Main App Container -->
     <div id="app-container" class="relative w-full h-full flex flex-col hidden">
-        <!-- Floating Header -->
         <header class="absolute top-0 inset-x-0 p-4 flex items-center justify-center z-[1000] pointer-events-none">
             <div class="bg-white/80 backdrop-blur-md px-6 py-3 rounded-full shadow-lg">
                 <h1 class="text-xl font-bold text-gray-800 tracking-tight">GéoLycée</h1>
             </div>
         </header>
 
-        <!-- Views Container -->
         <main class="flex-grow w-full h-full relative overflow-hidden">
-            <!-- Map View -->
             <div id="map-view" class="w-full h-full">
                 <div id="map"></div>
                 <div id="status" class="hidden"></div>
             </div>
-
-            <!-- Friends & Settings Views -->
             <div id="friends-view" class="w-full h-full bg-gray-50 p-6 pt-24 overflow-y-auto hidden">
                 <h2 class="text-3xl font-bold text-gray-800 mb-6">Amis</h2>
                 <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
                     <h3 class="font-semibold text-gray-700 mb-2">Partagez votre ID</h3>
-                    <p class="text-sm text-gray-500 mb-3">Donnez cet ID à vos amis pour qu'ils puissent vous ajouter.</p>
+                    <p class="text-sm text-gray-500 mb-3">Donnez cet ID unique à vos amis.</p>
                     <div class="flex items-center gap-2 bg-gray-100 p-2 rounded-lg">
                         <p id="user-id-display" class="text-xs font-mono text-gray-600 truncate flex-grow"></p>
                         <button id="copy-id-btn" class="bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600 transition active:scale-95">
@@ -625,7 +439,6 @@
                      <p class="mt-4 text-gray-500">La liste d'amis sera bientôt disponible.</p>
                  </div>
             </div>
-
             <div id="settings-view" class="w-full h-full bg-gray-50 p-6 pt-24 overflow-y-auto hidden">
                  <h2 class="text-3xl font-bold text-gray-800 mb-6">Paramètres</h2>
                  <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
@@ -655,7 +468,6 @@
             </div>
         </main>
         
-        <!-- Bottom Navigation Menu -->
         <nav class="bottom-nav">
             <div class="nav-content">
                 <button id="friends-btn-container" class="menu-btn-container">
